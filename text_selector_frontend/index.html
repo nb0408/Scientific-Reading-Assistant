@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  #selectable-text {
+    white-space: pre-wrap;
+    line-height: 1.6;
+    font-size: 1rem;
+    color: #34e6f0;
+    padding: 4px 2px;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  #selectable-text::selection {
+    background: #efeaea7a;
+  }
+  #hint {
+    font-size: 0.78rem;
+    color: rgb(120, 120, 130);
+    margin-top: 6px;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+  <div id="selectable-text"></div>
+  <div id="hint">Highlight any part of this passage to get an instant simplified explanation of just that part.</div>
+
+<script>
+  // Minimal, dependency-free implementation of the Streamlit bidirectional
+  // component postMessage protocol -- no streamlit-component-lib build step
+  // needed, so this stays a plain static HTML/JS file.
+
+  function sendToStreamlit(type, data) {
+    var payload = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+    window.parent.postMessage(payload, "*");
+  }
+
+  function setFrameHeight() {
+    var h = document.documentElement.scrollHeight;
+    sendToStreamlit("streamlit:setFrameHeight", { height: h });
+  }
+
+  function sendValue(value) {
+    sendToStreamlit("streamlit:setComponentValue", { value: value });
+  }
+
+  var container = document.getElementById("selectable-text");
+  var lastRenderedText = null;
+  var lastSentSelection = null;
+  var debounceTimer = null;
+
+  function handleSelectionChange() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function () {
+      var sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+
+      // Ignore selections that aren't inside our text block (e.g. the hint line).
+      var anchor = sel.anchorNode;
+      if (!anchor || !container.contains(anchor)) return;
+
+      var selected = sel.toString().trim();
+      if (selected.length < 2) return; // ignore accidental single-char selections
+      if (selected === lastSentSelection) return;
+
+      lastSentSelection = selected;
+      sendValue(selected);
+    }, 350); // debounce so we send once the reader has actually stopped dragging/selecting
+  }
+
+  document.addEventListener("selectionchange", handleSelectionChange);
+  // touchend covers mobile/tablet, where selectionchange timing is less reliable
+  document.addEventListener("touchend", handleSelectionChange);
+
+  function onRender(event) {
+    if (!event.data || event.data.type !== "streamlit:render") return;
+    var args = event.data.args || {};
+    var text = args.text || "";
+    if (text !== lastRenderedText) {
+      container.innerText = text; // innerText, not innerHTML -- no HTML injection risk
+      lastRenderedText = text;
+    }
+    setFrameHeight();
+  }
+
+  window.addEventListener("message", onRender);
+  window.addEventListener("resize", setFrameHeight);
+
+  // Handshake: tell Streamlit we're ready to receive render events.
+  sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+  setFrameHeight();
+</script>
+</body>
+</html>
